@@ -97,22 +97,18 @@ SIP (verified: macOS Tahoe 26.7.1, OpenCore 1.0.7, csr-active-config = 00000000)
 
 ### Installation (OpenCore)
 
+**Kernel → Add — required order:**  
 | Step | Action | Detail |
 |------|--------|--------|
 | 1 | Copy BOTH kexts | `EFI/OC/Kexts/` |
 | 2 | OC config: Kernel → Add | Array order = link order (wrong order = `Invalid Parameter`): see table below |
-| 3 | Kernel → Block | No entries needed |
-| 4 | SIP | No changes — works fully enabled |
+| 3 | Kernel → Add → |`IOAudioFamily.kext` **TOP** — must be first  |
+| 4 | Kernel → Add → |`VoodooHDA.kext` **BELOW** — IOAudioFamily |
+| 5 | SIP | No changes — works fully enabled |
+| 6 | Reboot | 
 
-**Kernel → Add — required order:**
-
-| Order | BundlePath | Position |
-|-------|------------|----------|
-| **1** | `IOAudioFamily.kext` | **TOP** — must be first |
-| 2 | `VoodooHDA.kext` | below IOAudioFamily |
-   (verified: macOS Tahoe 26.7.1, OpenCore 1.0.7, csr-active-config = 00000000). 
-    5. Reboot 
-
+SIP (verified: macOS Tahoe 26.7.1, OpenCore 1.0.7, csr-active-config = 00000000). 
+    
 Verify:
 
     kmutil showloaded | grep -i voodoo
