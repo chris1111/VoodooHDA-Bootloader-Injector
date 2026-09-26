@@ -124,7 +124,7 @@ intact) to place them at a new address. KDK ships pristine pre-link binaries
 ## Tested
 
     VoodooHDA V-2.9.2  -> audio CONFIRMED (analog + HDMI), macOS 26.3
-    VoodooHDA V-3.6.7  -> boots and loads (codec support varies per machine)
+    VoodooHDA V-2.9.2  -> (use for old machine like HP Prodesk 600 G1)
     OpenCore and Clover (shared OcAppleKernelLib engine)
 
 ## Credits
