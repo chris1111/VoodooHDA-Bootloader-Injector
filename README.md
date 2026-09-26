@@ -1,3 +1,4 @@
+[![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](https://github.com/chris1111/VoodooHDA-Bootloader-Injector/blob/main/LICENSE)
 # VoodooHDA Bootloader Injector
 
 - [x] `Clone and build :` 
