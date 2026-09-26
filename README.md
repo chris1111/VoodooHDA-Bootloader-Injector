@@ -1,5 +1,12 @@
 # VoodooHDA Bootloader Injector
 
+- [x] `Clone and build :` 
+```bash
+git clone https://github.com/chris1111/VoodooHDA-Bootloader-Injector.git
+```
+- Run: `VoodooHDA Injector.tool`
+
+-----------------------------------------------------------------
 
 ## What the Injection Script does — explained
 
