@@ -1,0 +1,1039 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<title>VoodooHDA Bootloader Injector</title>
+<meta name="description" content="Bootloader-level injection of VoodooHDA on macOS 11 → 26 — the alias trick, explained.">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,100..900;1,62..125,100..900&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+
+<style>
+/* ================= tokens ================= */
+:root{
+  --bg:#0a0b0d; --bg-1:#0f1114; --bg-2:#13161a; --bg-3:#181c21;
+  --line:#22262c; --line-2:#2d323a;
+  --text:#e9e6de; --body:#c2c7ce; --dim:#8d939c; --faint:#5f656e;
+  --amber:#f5a83c; --amber-2:#ffc06a; --amber-dim:rgba(245,168,60,.12);
+  --red:#ff6158; --red-dim:rgba(255,97,88,.10);
+  --green:#3fd68b; --green-dim:rgba(63,214,139,.10);
+  --sans:'Archivo',sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+
+/* ================= base ================= */
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--body);font:400 16px/1.72 var(--sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+::selection{background:var(--amber);color:#181206}
+::-webkit-scrollbar{width:11px}
+::-webkit-scrollbar-thumb{background:#242830;border:3px solid var(--bg);border-radius:8px}
+::-webkit-scrollbar-track{background:var(--bg)}
+a{color:var(--amber-2);text-decoration:none}
+a:hover{text-decoration:underline;text-underline-offset:3px}
+h1,h2,h3,h4{color:var(--text);font-weight:700}
+.lucide{width:15px;height:15px;stroke-width:2}
+
+/* ================= progress ================= */
+#pbar{position:fixed;top:0;left:0;height:2px;width:0;background:var(--amber);z-index:120}
+
+/* ================= back to top ================= */
+#toTop{position:fixed;right:24px;bottom:24px;z-index:110;width:46px;height:46px;border-radius:13px;background:#15181d;border:1px solid var(--line-2);color:var(--dim);display:grid;place-items:center;cursor:pointer;opacity:0;transform:translateY(14px);pointer-events:none;transition:opacity .28s,transform .28s,border-color .18s,color .18s;box-shadow:0 12px 32px rgba(0,0,0,.5)}
+#toTop.show{opacity:1;transform:none;pointer-events:auto}
+#toTop:hover{color:var(--amber-2);border-color:var(--amber)}
+#toTop .lucide{width:18px;height:18px}
+
+/* ================= shell / rail ================= */
+.shell{display:grid;grid-template-columns:266px minmax(0,1fr);max-width:1480px;margin:0 auto}
+.rail{position:sticky;top:0;height:100vh;border-right:1px solid var(--line);padding:26px 20px 22px;display:flex;flex-direction:column;gap:26px;overflow-y:auto}
+.wordmark{display:flex;align-items:center;gap:11px}
+.wm-box{width:34px;height:34px;border:1px solid var(--amber);border-radius:9px;display:grid;place-items:center;color:var(--amber);flex:none}
+.wm-box .lucide{width:17px;height:17px}
+.wm-txt{font:600 11px/1.5 var(--mono);letter-spacing:.16em;color:var(--text)}
+.wm-txt em{display:block;font-style:normal;color:var(--faint);letter-spacing:.1em}
+.nav{display:flex;flex-direction:column;gap:1px}
+.nav a{display:flex;gap:11px;align-items:baseline;padding:7px 10px;border-radius:8px;border-left:2px solid transparent;color:var(--dim);font:500 12.5px var(--mono);letter-spacing:.02em;transition:.18s}
+.nav a i{font-style:normal;color:var(--faint);font-size:11px;transition:.18s}
+.nav a:hover{color:var(--text);text-decoration:none;background:var(--bg-2)}
+.nav a.on{color:var(--amber-2);background:var(--amber-dim);border-left-color:var(--amber)}
+.nav a.on i{color:var(--amber)}
+.rail-meta{margin-top:auto;padding-top:18px;border-top:1px solid var(--line);font:400 10.5px/1.9 var(--mono);color:var(--faint);letter-spacing:.05em}
+.rail-meta b{color:var(--dim);font-weight:500}
+.rail-meta a{color:var(--dim);display:inline-flex;align-items:center;gap:6px;margin-top:8px}
+.rail-meta a:hover{color:var(--amber-2);text-decoration:none}
+
+/* topbar (mobile) */
+.topbar{display:none;position:sticky;top:0;z-index:60;background:rgba(10,11,13,.88);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);padding:11px 20px;align-items:center;justify-content:space-between}
+
+/* ================= main / content ================= */
+main{padding:0 clamp(20px,4.5vw,64px);min-width:0}
+.content{max-width:900px;margin:0 auto}
+section{padding:82px 0 8px;scroll-margin-top:76px;position:relative}
+section:first-of-type{padding-top:52px}
+
+/* section headers */
+.sec-h{display:flex;gap:18px;align-items:flex-start;margin-bottom:36px;position:relative;z-index:1}
+.sec-no{font:600 12px var(--mono);color:var(--amber);border:1px solid rgba(245,168,60,.4);padding:5px 9px;border-radius:7px;letter-spacing:.1em;flex:none;margin-top:6px}
+.kicker{font:600 10.5px var(--mono);letter-spacing:.22em;text-transform:uppercase;color:var(--faint);margin-bottom:8px}
+.sec-h h2{font-size:clamp(25px,3.2vw,36px);font-stretch:114%;letter-spacing:-.015em;line-height:1.12}
+.sec-mark{position:absolute;right:0;top:-42px;font:700 clamp(78px,9vw,138px)/1 var(--mono);color:#12151a;user-select:none;pointer-events:none;z-index:-1}
+
+.prose{max-width:72ch}
+.prose p{margin-bottom:16px}
+.prose strong{color:var(--text);font-weight:600}
+.ic{font:500 .85em var(--mono);background:#15181d;border:1px solid var(--line);border-radius:6px;padding:.12em .45em;color:#e4ddca;overflow-wrap:anywhere}
+.ic.a{color:var(--amber-2);border-color:rgba(245,168,60,.3)}
+
+/* ================= hero ================= */
+.hero{display:grid;grid-template-columns:1.06fr .94fr;gap:clamp(32px,4vw,60px);align-items:start;padding:58px 0 44px;position:relative}
+.hero::before{content:"";position:absolute;inset:-52px -40px 0;background-image:radial-gradient(rgba(233,230,222,.045) 1px,transparent 1.4px);background-size:27px 27px;-webkit-mask-image:linear-gradient(#000 55%,transparent);mask-image:linear-gradient(#000 55%,transparent);pointer-events:none}
+.hero>*{position:relative}
+.eyebrow{display:flex;align-items:center;gap:12px;font:600 11px var(--mono);letter-spacing:.2em;color:var(--dim);text-transform:uppercase;margin-bottom:26px}
+.eyebrow::before{content:"";width:26px;height:1px;background:var(--amber)}
+.h1{font-stretch:122%;font-weight:800;letter-spacing:-.02em;line-height:.98;font-size:clamp(42px,6.4vw,80px);text-transform:uppercase}
+.h1 .l2{display:block;color:transparent;-webkit-text-stroke:1.5px var(--text)}
+@supports not (-webkit-text-stroke:1px red){.h1 .l2{color:var(--text)}}
+.h1 .l3{display:block;color:var(--amber)}
+.lede{margin:26px 0 30px;font-size:17px;color:var(--body);max-width:56ch}
+.lede b{color:var(--text);font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:26px}
+.chip{display:inline-flex;align-items:center;gap:8px;font:500 11px var(--mono);letter-spacing:.06em;color:var(--dim);border:1px solid var(--line);border-radius:99px;padding:5px 12px}
+.chip::before{content:"";width:5px;height:5px;background:var(--amber);flex:none}
+
+/* ================= normal card system ================= */
+.card{background:var(--bg-1);border:1px solid var(--line);border-radius:13px;padding:18px 20px}
+.card-label{display:flex;align-items:center;gap:9px;font:600 10.5px var(--mono);letter-spacing:.22em;text-transform:uppercase;color:var(--faint)}
+.card-label::before{content:"";width:22px;height:1px;background:var(--amber);flex:none}
+.card-label .cl-sub{letter-spacing:.05em;text-transform:none;font-weight:500;color:var(--faint)}
+.card-label .ibtn{margin-left:auto;width:26px;height:26px}
+.card-mono{margin-top:12px;font:400 13px/1.8 var(--mono);color:#cfd3d9}
+.card-mono .bl{white-space:pre-wrap;word-break:break-word;min-height:1.8em}
+.err-card{border-color:rgba(255,97,88,.28)}
+.err-card .card-label::before{background:var(--red)}
+.cmd-row{display:flex;align-items:center;gap:6px}
+.cmd-row .cmd{flex:1;min-width:0}
+.cmd-row + .cmd-row{margin-top:2px}
+
+/* ================= quick start card ================= */
+.qs-card{background:var(--bg-1);border:1px solid var(--line);border-radius:13px;padding:20px 20px 18px}
+.qs-label{font:600 10.5px var(--mono);letter-spacing:.22em;text-transform:uppercase;color:var(--faint);display:flex;align-items:center;gap:9px}
+.qs-label::before{content:"";width:22px;height:1px;background:var(--amber)}
+.qs-step{display:flex;align-items:center;gap:10px;font:600 12px var(--mono);letter-spacing:.05em;color:var(--text);margin:18px 0 8px}
+.qs-step:first-of-type{margin-top:14px}
+.qs-n{width:20px;height:20px;border:1px solid rgba(245,168,60,.4);border-radius:6px;display:grid;place-items:center;color:var(--amber);font:700 10.5px var(--mono);flex:none}
+.qs-field{display:flex;align-items:center;gap:10px;background:#0c0e11;border:1px solid var(--line);border-radius:9px;padding:9px 10px 9px 13px;transition:border-color .18s}
+.qs-field:focus-within{border-color:rgba(245,168,60,.4)}
+.qs-pre{font:600 12px var(--mono);color:var(--amber);flex:none;user-select:none}
+.qs-field code{font:500 12.5px var(--mono);color:#e4ddca;flex:1;min-width:0;overflow-wrap:anywhere}
+.qs-field .lucide{width:14px;height:14px;color:var(--faint);flex:none}
+.qs-field .ibtn{width:26px;height:26px}
+
+/* ================= log text colors ================= */
+.dim{color:var(--faint)} .err{color:var(--red)}
+.kname{color:var(--amber-2)} .cm{color:var(--amber);font-style:italic}
+.cur{display:inline-block;width:8px;height:15px;background:var(--amber);vertical-align:-2px;margin-left:2px;animation:blink 1.05s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.prompt{color:var(--amber);user-select:none}
+.cap{font:400 11.5px/1.7 var(--mono);color:var(--faint);margin-top:10px}
+.cap b{color:var(--amber);font-weight:600}
+
+/* copy buttons */
+.ibtn{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--faint);cursor:pointer;transition:.18s;flex:none}
+.ibtn:hover{color:var(--amber-2);background:var(--bg-3);border-color:var(--line-2)}
+.ibtn .ic-check{display:none;color:var(--green)}
+.ibtn.done .ic-copy{display:none}
+.ibtn.done .ic-check{display:inline-flex}
+
+/* ================= pull quote ================= */
+.pull{font:600 clamp(23px,3.1vw,37px)/1.42 var(--sans);font-stretch:112%;letter-spacing:-.015em;color:var(--text);margin:6px 0 22px;max-width:24em}
+.pull .hl{color:var(--amber);border-bottom:1px solid rgba(245,168,60,.45);padding-bottom:2px}
+.aside-note{font:400 13px var(--mono);color:var(--faint);border-left:2px solid var(--line-2);padding-left:16px}
+
+/* ================= step timeline ================= */
+.steps{margin-top:8px}
+.step{display:grid;grid-template-columns:56px 1fr;gap:22px 26px;position:relative;padding-bottom:52px}
+.step::before{content:"";position:absolute;left:27px;top:64px;bottom:14px;width:1px;background:var(--line-2)}
+.step:last-child{padding-bottom:12px}
+.step:last-child::before{display:none}
+.step-num{width:54px;height:54px;border:1px solid var(--line-2);background:var(--bg-1);border-radius:13px;display:grid;place-items:center;font:600 15px var(--mono);color:var(--amber);position:relative;z-index:1}
+.step h3{font-size:21px;font-stretch:110%;letter-spacing:-.01em;line-height:1.3;margin-bottom:10px;padding-top:12px}
+.step h3 .tag{font:600 10px var(--mono);letter-spacing:.16em;color:var(--faint);border:1px solid var(--line);padding:3px 8px;border-radius:6px;vertical-align:3px;margin-left:10px;text-transform:uppercase}
+.step p{margin-bottom:12px;max-width:70ch}
+
+.guard{display:flex;gap:14px;padding:13px 0;border-bottom:1px solid var(--line);align-items:flex-start}
+.guard:last-child{border-bottom:none}
+.gtag{font:700 10.5px var(--mono);letter-spacing:.12em;padding:4px 9px;border-radius:6px;flex:none;margin-top:3px}
+.gtag.red{color:#ff928b;background:var(--red-dim);border:1px solid rgba(255,97,88,.35)}
+.gtag.amb{color:var(--amber-2);background:var(--amber-dim);border:1px solid rgba(245,168,60,.35)}
+.guard p{margin:0;font-size:15px}
+
+.branch{border:1px solid var(--line);border-left:2px solid var(--line-2);border-radius:0 11px 11px 0;background:var(--bg-1);padding:15px 18px;margin:14px 0}
+.branch .btag{font:700 10px var(--mono);letter-spacing:.2em;color:var(--amber);display:block;margin-bottom:7px}
+.branch p{margin:0 0 6px;font-size:15px}
+ul.arrows{list-style:none;margin:6px 0}
+ul.arrows li{padding-left:24px;position:relative;margin:5px 0;font-size:15px}
+ul.arrows li::before{content:"→";position:absolute;left:0;color:var(--amber);font:600 13px var(--mono)}
+
+.callout{display:flex;gap:13px;border:1px solid var(--line);background:var(--bg-1);border-radius:11px;padding:15px 17px;margin:16px 0;font-size:15px;max-width:76ch}
+.callout .lucide{flex:none;margin-top:4px;width:16px;height:16px}
+.callout.note{border-color:rgba(245,168,60,.32)} .callout.note .lucide{color:var(--amber)}
+.callout.warn{border-color:rgba(255,97,88,.32)} .callout.warn .lucide{color:var(--red)}
+.callout.good{border-color:rgba(63,214,139,.32)} .callout.good .lucide{color:var(--green)}
+.callout p{margin:0}
+
+/* ================= tables ================= */
+.tblwrap{border:1px solid var(--line);border-radius:12px;background:var(--bg-1);overflow-x:auto;margin:14px 0 8px}
+table{width:100%;min-width:560px;border-collapse:collapse;font-size:14.5px}
+th{font:600 10.5px var(--mono);text-transform:uppercase;letter-spacing:.14em;color:var(--faint);text-align:left;padding:11px 16px;border-bottom:1px solid var(--line-2)}
+td{padding:13px 16px;border-bottom:1px solid var(--line);vertical-align:top}
+tbody tr:last-child td{border-bottom:none}
+tbody tr{transition:background .15s}
+tbody tr:hover{background:#12151a}
+td.stepnum{font:600 13px var(--mono);color:var(--amber);white-space:nowrap}
+tr.crit td{background:rgba(245,168,60,.045)}
+tr.crit td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
+.crit-tag{display:inline-block;font:700 9px var(--mono);letter-spacing:.14em;color:var(--amber);border:1px solid rgba(245,168,60,.4);border-radius:5px;padding:2px 6px;margin-top:5px;text-transform:uppercase}
+td .dim{font-size:13px}
+
+/* ================= simulator ================= */
+.sim{border:1px solid var(--line-2);border-radius:15px;background:#0c0e11;overflow:hidden;margin:26px 0 14px}
+.sim-top{display:flex;flex-wrap:wrap;gap:14px;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--line);background:var(--bg-1)}
+.sim-title{font:600 11px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.sim-title b{color:var(--text)}
+.sim-controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.seg{display:flex;gap:3px;border:1px solid var(--line-2);border-radius:10px;padding:3px;background:var(--bg)}
+.seg button{font:600 11.5px var(--mono);letter-spacing:.03em;color:var(--dim);background:transparent;border:none;border-radius:7px;padding:7px 12px;cursor:pointer;transition:.18s}
+.seg button:hover{color:var(--text)}
+.seg button.active{background:var(--amber-dim);color:var(--amber-2)}
+.seg button:disabled{opacity:.45;cursor:default}
+.btn{display:inline-flex;align-items:center;gap:8px;font:600 11.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--text);background:transparent;border:1px solid var(--line-2);border-radius:9px;padding:9px 15px;cursor:pointer;transition:.18s}
+.btn:hover{border-color:var(--amber);color:var(--amber-2)}
+.btn.primary{background:var(--amber);border-color:var(--amber);color:#1a1104}
+.btn.primary:hover{background:var(--amber-2);color:#1a1104}
+.btn:disabled{opacity:.45;cursor:default}
+.btn:disabled:hover{border-color:var(--line-2);color:var(--text)}
+.btn.primary:disabled:hover{background:var(--amber)}
+
+.sim-stage{display:grid;grid-template-columns:1fr 44px 1.25fr;gap:0;padding:22px 18px}
+.zone{border:1px dashed var(--line-2);border-radius:12px;padding:12px;min-height:196px;display:flex;flex-direction:column;gap:9px}
+.zone.buffer{border-style:solid;background:rgba(245,168,60,.028)}
+.zlabel{font:600 10px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin-bottom:2px}
+.zlabel span{color:#3a3f47;text-transform:none;letter-spacing:.04em}
+.ph{margin:auto;font:400 11px var(--mono);color:#3a3f47;letter-spacing:.14em;text-transform:uppercase}
+.flow{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:var(--faint)}
+.flow .lucide{width:18px;height:18px;color:var(--amber)}
+.flow span{font:600 8.5px var(--mono);letter-spacing:.14em;text-transform:uppercase;writing-mode:vertical-rl}
+
+.kcard{position:relative;border:1px solid var(--line-2);background:var(--bg-2);border-radius:10px;padding:10px 13px;min-width:172px}
+.kc-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.kn{font:600 12.5px var(--mono);color:var(--text)}
+.kmark{font:700 13px var(--mono)}
+.ki{font:400 10.5px/1.6 var(--mono);color:var(--faint);margin-top:4px;overflow-wrap:anywhere}
+.kcard.linked{border-color:rgba(63,214,139,.55)} .kcard.linked .kmark{color:var(--green)}
+.kcard.failed{border-color:rgba(255,97,88,.55)} .kcard.failed .kmark{color:var(--red)}
+.kcard.late{opacity:.4}
+
+.sim-log{border-top:1px solid var(--line);padding:13px 18px;min-height:104px;font:400 12.5px/1.7 var(--mono);display:flex;flex-direction:column;gap:5px}
+.ln{opacity:0;transform:translateY(4px);animation:lin .35s ease forwards;display:flex;gap:10px;overflow-wrap:anywhere}
+@keyframes lin{to{opacity:1;transform:none}}
+.ln .lg{flex:none;font-weight:700}
+.ln.ok .lg{color:var(--green)} .ln.ok{color:#b7e6cd}
+.ln.err .lg{color:var(--red)} .ln.err{color:#f0b1ac}
+.ln.diml{color:var(--dim)} .ln.diml .lg{color:var(--faint)}
+.lt{color:var(--faint)}
+
+.sim-status{display:flex;gap:11px;align-items:center;padding:14px 18px;border-top:1px solid var(--line);font:500 12.5px/1.6 var(--mono);color:var(--faint);min-height:56px}
+.sim-status .lucide{flex:none;width:17px;height:17px}
+.sim-status.ok{color:var(--green);background:var(--green-dim)}
+.sim-status.err{color:var(--red);background:var(--red-dim)}
+
+/* ================= alias figure ================= */
+.rename{display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;padding:22px;border:1px dashed var(--line-2);border-radius:13px;margin:20px 0;font:600 clamp(12px,1.6vw,15px)/1.5 var(--mono)}
+.rename .old{color:var(--dim);text-decoration:line-through;text-decoration-color:rgba(255,97,88,.75);text-decoration-thickness:1.5px;overflow-wrap:anywhere}
+.rename .lucide{color:var(--amber);width:18px;height:18px;flex:none}
+.rename .new{color:var(--amber-2);overflow-wrap:anywhere}
+.rename .where{flex-basis:100%;font:400 11px var(--mono);color:var(--faint);letter-spacing:.05em}
+
+.lanes{border:1px solid var(--line);border-radius:13px;background:var(--bg-1);padding:6px 18px;margin:18px 0}
+.lane{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:15px 0}
+.lane + .lane{border-top:1px solid var(--line)}
+.lane-src{font:600 10.5px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--faint);width:96px;flex:none}
+.kchip{font:600 12.5px var(--mono);border:1px solid var(--line-2);background:var(--bg-2);border-radius:8px;padding:7px 12px;overflow-wrap:anywhere}
+.kchip.a{border-color:rgba(245,168,60,.45);color:var(--amber-2)}
+.lane .lucide{color:var(--faint);width:14px;height:14px;flex:none}
+.lane-use{font:400 12.5px var(--mono);color:var(--dim)}
+.lanes-foot{display:flex;gap:10px;align-items:center;justify-content:center;font:500 11px var(--mono);letter-spacing:.1em;color:var(--dim);padding:12px 0;border-top:1px solid var(--line)}
+.lanes-foot .lucide{color:var(--green);width:14px;height:14px}
+
+/* ================= compare rows ================= */
+.cmp{display:flex;gap:14px;padding:16px 18px;border:1px solid var(--line);border-radius:12px;background:var(--bg-1);margin:12px 0;align-items:flex-start}
+.cmp .lucide{flex:none;width:17px;height:17px;margin-top:4px}
+.cmp.bad .lucide{color:var(--red)} .cmp.good .lucide{color:var(--green)}
+.cmp h4{font:600 13px var(--mono);letter-spacing:.02em;margin-bottom:4px}
+.cmp.bad h4{color:#f0b1ac} .cmp.good h4{color:#a9e5c6}
+.cmp p{font-size:14.5px;margin:0}
+.cmp p b{color:var(--text)}
+
+/* ================= tested / credits ================= */
+.trow{display:grid;grid-template-columns:210px 1fr auto;gap:8px 18px;padding:16px 2px;border-bottom:1px solid var(--line);align-items:baseline}
+.trow:last-child{border-bottom:none}
+.tname{font:600 13.5px var(--mono);color:var(--amber-2)}
+.tdesc{font-size:15px}
+.tdesc .dim{font-size:13px;font-family:var(--mono)}
+.badge{font:700 10px var(--mono);letter-spacing:.12em;color:var(--green);border:1px solid rgba(63,214,139,.4);background:var(--green-dim);padding:4px 10px;border-radius:99px;white-space:nowrap;justify-self:end}
+.badge.mono2{color:var(--dim);border-color:var(--line-2);background:transparent}
+
+.crow{display:grid;grid-template-columns:minmax(160px,300px) 1fr;gap:8px 24px;padding:15px 2px;border-bottom:1px solid var(--line);align-items:baseline}
+.crow:last-child{border-bottom:none}
+.cname{font:600 14px var(--mono);color:var(--text)}
+.crole{font-size:14.5px;color:var(--dim)}
+
+/* ================= footer / toast ================= */
+footer{margin-top:90px;border-top:1px solid var(--line);padding:34px 0 46px;display:flex;flex-wrap:wrap;gap:14px;justify-content:space-between;align-items:center;font:400 12px/1.8 var(--mono);color:var(--faint);letter-spacing:.04em}
+footer a{display:inline-flex;align-items:center;gap:7px;color:var(--dim)}
+footer a:hover{color:var(--amber-2);text-decoration:none}
+
+#toast{position:fixed;left:50%;bottom:30px;transform:translate(-50%,14px);opacity:0;pointer-events:none;transition:.28s cubic-bezier(.2,.8,.3,1);background:#15181d;border:1px solid var(--line-2);color:var(--text);font:500 12.5px var(--mono);padding:10px 18px;border-radius:99px;display:flex;gap:9px;align-items:center;z-index:130;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+#toast.show{transform:translate(-50%,0);opacity:1}
+#toast .lucide{width:14px;height:14px;color:var(--green)}
+
+/* ================= reveal ================= */
+.rv{opacity:0;transform:translateY(16px);transition:opacity .65s ease,transform .65s ease}
+.rv.in{opacity:1;transform:none}
+
+/* ================= responsive ================= */
+@media (max-width:1120px){
+  .shell{grid-template-columns:1fr}
+  .rail{display:none}
+  .topbar{display:flex}
+  .sec-mark{display:none}
+  .hero{grid-template-columns:1fr}
+}
+@media (max-width:700px){
+  #toTop{right:16px;bottom:16px;width:42px;height:42px}
+  .sim-stage{grid-template-columns:1fr;gap:16px}
+  .flow{flex-direction:row}
+  .flow .lucide{transform:rotate(90deg)}
+  .flow span{writing-mode:horizontal-tb}
+  .step{grid-template-columns:46px 1fr;gap:16px}
+  .step-num{width:44px;height:44px;border-radius:11px;font-size:13px}
+  .step::before{left:22px}
+  .trow{grid-template-columns:1fr;gap:4px}
+  .badge{justify-self:start}
+  .crow{grid-template-columns:1fr;gap:2px}
+  section{padding:62px 0 6px}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important}
+  html{scroll-behavior:auto}
+  .rv{opacity:1;transform:none}
+}
+</style>
+</head>
+<body>
+
+<div id="pbar"></div>
+
+<!-- mobile top bar -->
+<div class="topbar">
+  <div class="wordmark">
+    <div class="wm-box"><i data-lucide="audio-waveform"></i></div>
+    <div class="wm-txt">VOODOOHDA<em>INJECTOR</em></div>
+  </div>
+  <a href="https://github.com/chris1111/VoodooHDA-Bootloader-Injector" target="_blank" rel="noopener" class="ibtn" title="GitHub repository" aria-label="GitHub repository"><i data-lucide="github"></i></a>
+</div>
+
+<div class="shell">
+
+  <!-- ============ side rail ============ -->
+  <aside class="rail">
+    <div class="wordmark">
+      <div class="wm-box"><i data-lucide="audio-waveform"></i></div>
+      <div class="wm-txt">VOODOOHDA<em>BOOTLOADER INJECTOR</em></div>
+    </div>
+    <nav class="nav" id="nav">
+      <a href="#s01"><i>01</i> The problem</a>
+      <a href="#s02"><i>02</i> The idea</a>
+      <a href="#s03"><i>03</i> Step by step</a>
+      <a href="#s04"><i>04</i> Installation</a>
+      <a href="#s05"><i>05</i> Verify</a>
+      <a href="#s06"><i>06</i> Link order</a>
+      <a href="#s07"><i>07</i> The alias</a>
+      <a href="#s08"><i>08</i> KDK binaries</a>
+      <a href="#s09"><i>09</i> Tested</a>
+      <a href="#s10"><i>10</i> Credits</a>
+    </nav>
+    <div class="rail-meta">
+      <b>VoodooHDA</b> 2.9.2 · x86_64<br>
+      prelink injection · KDK-aware<br>
+      csr-active-config <b>00000000</b><br>
+      <a href="https://github.com/chris1111/VoodooHDA-Bootloader-Injector" target="_blank" rel="noopener"><i data-lucide="github"></i>chris1111/VoodooHDA-Bootloader-Injector</a>
+    </div>
+  </aside>
+
+  <!-- ============ main ============ -->
+  <main>
+    <div class="content">
+
+      <!-- ============ HERO ============ -->
+      <section id="top">
+        <div class="hero">
+          <div>
+            <div class="eyebrow">Bootloader-level kext injection · macOS 11 → 26</div>
+            <h1 class="h1">VoodooHDA<span class="l2">Bootloader</span><span class="l3">Injector</span></h1>
+            <p class="lede">Since Big Sur, <b>VoodooHDA.kext can't be injected straight from the bootloader</b>. This tool makes it work anyway — one script, two patched kexts, <b>zero SIP compromises</b>. Clone it, run it, drop both kexts in your EFI.</p>
+
+            <div class="qs-card">
+              <div class="qs-label">Quick start</div>
+              <div class="qs-step"><span class="qs-n">1</span>Clone the repository</div>
+              <div class="qs-field">
+                <span class="qs-pre">git clone</span>
+                <code>https://github.com/chris1111/VoodooHDA-Bootloader-Injector.git</code>
+                <button class="ibtn" data-copy="https://github.com/chris1111/VoodooHDA-Bootloader-Injector.git" data-msg="Clone link copied" title="Copy clone link" aria-label="Copy clone link">
+                  <i data-lucide="copy" class="ic-copy"></i><i data-lucide="check" class="ic-check"></i>
+                </button>
+              </div>
+              <div class="qs-step"><span class="qs-n">2</span>Run the tool</div>
+              <div class="qs-field">
+                <i data-lucide="play"></i>
+                <code>VoodooHDA Injector.tool</code>
+              </div>
+            </div>
+
+            <div class="chips">
+              <span class="chip">macOS 11 → 26</span>
+              <span class="chip">OpenCore 1.0.7</span>
+              <span class="chip">Clover</span>
+              <span class="chip">x86_64</span>
+              <span class="chip">SIP fully enabled</span>
+            </div>
+          </div>
+
+          <div>
+            <div class="card">
+              <div class="card-label">Boot console <span class="cl-sub">· without the fix</span>
+                <button class="ibtn" id="bootReplay" title="Replay" aria-label="Replay boot log"><i data-lucide="rotate-ccw"></i></button>
+              </div>
+              <div class="card-mono" id="bootLines" style="min-height:190px"></div>
+            </div>
+            <p class="cap">↳ the failure every VoodooHDA user knows — <b>explained in §01</b>, fixed by this tool.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 01 PROBLEM ============ -->
+      <section id="s01">
+        <header class="sec-h rv">
+          <span class="sec-no">§01</span>
+          <div>
+            <div class="kicker">The problem</div>
+            <h2>Why direct injection fails</h2>
+          </div>
+          <span class="sec-mark">01</span>
+        </header>
+        <div class="prose rv">
+          <p>Since macOS Big Sur (11), injecting <span class="ic">VoodooHDA.kext</span> directly from the bootloader fails. The booter — <strong>OpenCore and Clover alike, they share the same injection engine</strong> — cannot link VoodooHDA because its parent classes live in Apple's <span class="ic">IOAudioFamily.kext</span>, which is <strong>not</strong> in the boot kernel collection (<span class="ic">BootKernelExtensions.kc</span>). The result, every single boot:</p>
+        </div>
+        <div class="card err-card rv" style="max-width:640px;margin:20px 0 24px">
+          <div class="card-label">OpenCore <span class="cl-sub">· verbose boot, every time</span></div>
+          <div class="card-mono">
+            <div class="bl"><span class="dim">[  0.018990] </span><span class="dim">OC: </span><span class="err">Prelinked injection VoodooHDA.kext () - Invalid Parameter</span></div>
+          </div>
+        </div>
+        <div class="prose rv"><p><strong>The script solves this automatically.</strong> Here is exactly what it does, step by step.</p></div>
+      </section>
+
+      <!-- ============ 02 IDEA ============ -->
+      <section id="s02">
+        <header class="sec-h rv">
+          <span class="sec-no">§02</span>
+          <div>
+            <div class="kicker">The fix</div>
+            <h2>The idea, in one sentence</h2>
+          </div>
+          <span class="sec-mark">02</span>
+        </header>
+        <p class="pull rv">Ship a <span class="hl">renamed copy</span> of Apple's IOAudioFamily.kext alongside VoodooHDA — and make VoodooHDA link against the renamed copy. The booter then resolves everything at prelink time.</p>
+        <p class="aside-note rv">everything else on this page is the careful execution of that sentence</p>
+      </section>
+
+      <!-- ============ 03 STEPS ============ -->
+      <section id="s03">
+        <header class="sec-h rv">
+          <span class="sec-no">§03</span>
+          <div>
+            <div class="kicker">What the script does</div>
+            <h2>Step by step</h2>
+          </div>
+          <span class="sec-mark">03</span>
+        </header>
+
+        <div class="steps">
+          <!-- STEP 1 -->
+          <div class="step rv">
+            <div class="step-num">01</div>
+            <div>
+              <h3>Safety guards <span class="tag">exits early if anything is wrong</span></h3>
+              <div class="guard">
+                <span class="gtag red">EXIT</span>
+                <p>VoodooHDA.kext is installed in <span class="ic">/Library/Extensions</span> — bootloader injection and an installed kext cannot coexist. The script prints the removal + rebuild commands for you.</p>
+              </div>
+              <div class="guard">
+                <span class="gtag red">DELETE&nbsp;+&nbsp;EXIT</span>
+                <p>VoodooHDA.kext is already patched (previous run) — prevents double-patching a distributed kext.</p>
+              </div>
+              <div class="guard">
+                <span class="gtag amb">RESET</span>
+                <p>The script uses the kext provided in the <span class="ic">ORIG-2.6.2</span> folder (unpatched VoodooHDA.kext) — it systematically regenerates the functional kext from this base.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- STEP 2 -->
+          <div class="step rv">
+            <div class="step-num">02</div>
+            <div>
+              <h3>Get a <em>real</em> IOAudioFamily.kext</h3>
+              <p>Apple increasingly ships IOAudioFamily as a <strong>hollow stub</strong> — no binary inside (verified on Ventura 13 and Tahoe 26). The script finds a real one, in this order:</p>
+              <div class="branch">
+                <span class="btag">A</span>
+                <p><span class="ic">/System/Library/Extensions</span> — used only if the binary is really there.</p>
+              </div>
+              <div class="branch">
+                <span class="btag">B</span>
+                <p><strong>Kernel Debug Kit</strong> — auto-downloaded from Dortania's KdkSupportPkg:</p>
+                <ul class="arrows">
+                  <li>matches your <strong>exact running build</strong> (<span class="ic">sw_vers</span>)</li>
+                  <li>no exact match? it asks you: closest build (risky) or abort</li>
+                  <li>mounts the <span class="ic">.dmg</span> in <span class="ic">/private/tmp</span></li>
+                  <li>expands the <span class="ic">.pkg</span> inside — yes, the dmg contains a pkg</li>
+                  <li>extracts <span class="ic">IOAudioFamily.kext</span> from the payload</li>
+                  <li>deletes the dmg + temp files automatically</li>
+                </ul>
+              </div>
+              <div class="callout warn">
+                <i data-lucide="alert-triangle"></i>
+                <p>Only KDK (or a real <span class="ic">/S/L/E</span>) binary is in the required <strong>pre-link</strong> state. Extracting from <span class="ic">SystemKernelExtensions.kc</span> does <strong>not</strong> work — those binaries are pre-relocated by Apple and hang the boot.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- STEP 3 -->
+          <div class="step rv">
+            <div class="step-num">03</div>
+            <div>
+              <h3>Patch the copy — the alias trick</h3>
+              <p>The copy is modified so it can coexist with Apple's stock IOAudioFamily:</p>
+              <ul class="arrows">
+                <li>binary thinned to <span class="ic">x86_64</span> (arm64e slice removed)</li>
+                <li>identifier renamed <strong>everywhere</strong> — inside the Mach-O binary <em>and</em> in Info.plist</li>
+              </ul>
+              <div class="callout good">
+                <i data-lucide="check-circle-2"></i>
+                <p>Without the rename, the duplicate identifier stalls early boot (DriverKit stage). With it, the kernel loads both stacks happily — <strong>tested and verified</strong>.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- STEP 4 -->
+          <div class="step rv">
+            <div class="step-num">04</div>
+            <div>
+              <h3>Patch VoodooHDA.kext</h3>
+              <p>Its <span class="ic">OSBundleLibraries</span> is rewritten:</p>
+              <div class="rename">
+                <span class="old">com.apple.iokit.IOAudioFamily</span>
+                <i data-lucide="arrow-right"></i>
+                <span class="new">net.voodoo.IOAudioFamily</span>
+                <span class="where">↳ so at prelink time the booter resolves VoodooHDA's 191 audio imports against the aliased copy injected just before it.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- STEP 5 -->
+          <div class="step rv">
+            <div class="step-num">05</div>
+            <div>
+              <h3>Sign both kexts <span class="tag">ad-hoc</span></h3>
+              <p>Both kexts are re-signed after patching, so signatures verify cleanly.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 04 INSTALL ============ -->
+      <section id="s04">
+        <header class="sec-h rv">
+          <span class="sec-no">§04</span>
+          <div>
+            <div class="kicker">After the script</div>
+            <h2>Installation</h2>
+          </div>
+          <span class="sec-mark">04</span>
+        </header>
+        <div class="prose rv"><p>Two kexts come out of the script — <span class="ic a">IOAudioFamily.kext</span> (the renamed alias) and <span class="ic a">VoodooHDA.kext</span> (patched). <strong>Both</strong> go into your EFI.</p></div>
+
+        <h3 class="rv" style="font-stretch:112%;margin:30px 0 4px;font-size:19px">Clover</h3>
+        <div class="tblwrap rv">
+          <table>
+            <thead><tr><th style="width:64px">Step</th><th style="width:34%">Action</th><th>Detail</th></tr></thead>
+            <tbody>
+              <tr><td class="stepnum">1</td><td>Copy <strong>BOTH kexts</strong></td><td><span class="ic">EFI/CLOVER/kexts/Other/</span></td></tr>
+              <tr><td class="stepnum">2</td><td>Kernel → Block</td><td>No entries needed</td></tr>
+              <tr><td class="stepnum">3</td><td>SIP</td><td>No changes — works fully enabled</td></tr>
+              <tr><td class="stepnum">4</td><td>Reboot</td><td><span class="dim">that's it</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="rv" style="font-stretch:112%;margin:34px 0 4px;font-size:19px">OpenCore</h3>
+        <p class="rv" style="font-size:15px;max-width:72ch"><strong>Kernel → Add — required order.</strong> The array order <em>is</em> the link order; wrong order = <span class="ic">Invalid Parameter</span> — see the live demo in <a href="#s06">§06</a>.</p>
+        <div class="tblwrap rv">
+          <table>
+            <thead><tr><th style="width:64px">Step</th><th style="width:34%">Action</th><th>Detail</th></tr></thead>
+            <tbody>
+              <tr><td class="stepnum">1</td><td>Copy <strong>BOTH kexts</strong></td><td><span class="ic">EFI/OC/Kexts/</span></td></tr>
+              <tr><td class="stepnum">2</td><td>OC config: Kernel → Add</td><td>Array order = link order — wrong order = <span class="ic">Invalid Parameter</span> <span class="dim">(table below)</span></td></tr>
+              <tr class="crit"><td class="stepnum">3</td><td>Kernel → Add<span class="crit-tag">order-critical</span></td><td><span class="ic a">IOAudioFamily.kext</span> <strong>TOP</strong> — must be first</td></tr>
+              <tr class="crit"><td class="stepnum">4</td><td>Kernel → Add<span class="crit-tag">order-critical</span></td><td><span class="ic a">VoodooHDA.kext</span> <strong>BELOW</strong> IOAudioFamily</td></tr>
+              <tr><td class="stepnum">5</td><td>SIP</td><td>No changes — works fully enabled</td></tr>
+              <tr><td class="stepnum">6</td><td>Reboot</td><td><span class="dim">that's it</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout good rv">
+          <i data-lucide="shield-check"></i>
+          <p><strong>SIP verified:</strong> macOS Tahoe 26.7.1 · OpenCore 1.0.7 · <span class="ic">csr-active-config = 00000000</span> — fully enabled, no changes required.</p>
+        </div>
+      </section>
+
+      <!-- ============ 05 VERIFY ============ -->
+      <section id="s05">
+        <header class="sec-h rv">
+          <span class="sec-no">§05</span>
+          <div>
+            <div class="kicker">Post-reboot</div>
+            <h2>Verify</h2>
+          </div>
+          <span class="sec-mark">05</span>
+        </header>
+        <div class="card rv" style="max-width:680px">
+          <div class="card-label">Terminal <span class="cl-sub">· after reboot</span></div>
+          <div class="card-mono">
+            <div class="bl cm"># confirm the stack is loaded</div>
+            <div class="cmd-row">
+              <div class="cmd bl"><span class="prompt">$ </span>kmutil showloaded | grep -i voodoo</div>
+              <button class="ibtn" data-copy="kmutil showloaded | grep -i voodoo" title="Copy" aria-label="Copy command"><i data-lucide="copy" class="ic-copy"></i><i data-lucide="check" class="ic-check"></i></button>
+            </div>
+            <div class="cmd-row">
+              <div class="cmd bl"><span class="prompt">$ </span>system_profiler SPAudioDataType</div>
+              <button class="ibtn" data-copy="system_profiler SPAudioDataType" title="Copy" aria-label="Copy command"><i data-lucide="copy" class="ic-copy"></i><i data-lucide="check" class="ic-check"></i></button>
+            </div>
+            <div class="bl cm"># expect: net.voodoo.IOAudioFamily + VoodooHDA among the loaded kexts</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 06 LINK ORDER ============ -->
+      <section id="s06">
+        <header class="sec-h rv">
+          <span class="sec-no">§06</span>
+          <div>
+            <div class="kicker">Why the order matters · Kernel → Add</div>
+            <h2>Order decides everything</h2>
+          </div>
+          <span class="sec-mark">06</span>
+        </header>
+        <div class="prose rv">
+          <p>The booter resolves each injected kext's imports against the kexts injected <strong>before it</strong> in the Kernel → Add array. IOAudioFamily first = VoodooHDA's classes resolve. VoodooHDA first = nothing to resolve against = <span class="ic">Invalid Parameter</span>.</p>
+          <p><strong>Try both orders below</strong> — the simulator runs the exact prelink sequence your bootloader performs.</p>
+        </div>
+
+        <div class="sim rv">
+          <div class="sim-top">
+            <div class="sim-title"><b>Kernel → Add</b> · link-order simulator</div>
+            <div class="sim-controls">
+              <div class="seg" role="group" aria-label="Injection order">
+                <button id="segGood" class="active" type="button">IOAudioFamily first</button>
+                <button id="segBad" type="button">VoodooHDA first</button>
+              </div>
+              <button class="btn primary" id="simRun" type="button"><i data-lucide="play"></i><span>Run prelink</span></button>
+              <button class="btn" id="simReset" type="button"><i data-lucide="rotate-ccw"></i><span>Reset</span></button>
+            </div>
+          </div>
+          <div class="sim-stage">
+            <div class="zone" id="tray">
+              <div class="zlabel">EFI/Kexts <span>— waiting</span></div>
+              <div class="kcard" id="cardIOAF">
+                <div class="kc-top"><span class="kn">IOAudioFamily.kext</span><span class="kmark"></span></div>
+                <div class="ki">imports → com.apple.kpi.* (kernel)</div>
+                <div class="ki">alias of com.apple.iokit.IOAudioFamily</div>
+              </div>
+              <div class="kcard" id="cardVood">
+                <div class="kc-top"><span class="kn">VoodooHDA.kext</span><span class="kmark"></span></div>
+                <div class="ki">imports → net.voodoo.IOAudioFamily</div>
+                <div class="ki">191 audio symbols</div>
+              </div>
+            </div>
+            <div class="flow"><i data-lucide="arrow-right"></i><span>inject</span></div>
+            <div class="zone buffer" id="buffer">
+              <div class="zlabel">BootKernelExtensions.kc <span>— prelink buffer</span></div>
+              <div class="ph" id="bufPh">empty</div>
+            </div>
+          </div>
+          <div class="sim-log" id="simLog"></div>
+          <div class="sim-status" id="simStatus"><i data-lucide="info"></i><span>Pick an order, then run the prelink.</span></div>
+        </div>
+      </section>
+
+      <!-- ============ 07 ALIAS ============ -->
+      <section id="s07">
+        <header class="sec-h rv">
+          <span class="sec-no">§07</span>
+          <div>
+            <div class="kicker">Why the alias matters</div>
+            <h2>Two kexts, one binary, zero collision</h2>
+          </div>
+          <span class="sec-mark">07</span>
+        </header>
+        <div class="prose rv">
+          <p>Two kexts with the same identifier <strong>cannot coexist</strong>. The stock IOAudioFamily (lives in the SystemKC) plus our injected copy = collision at early userspace. Renaming ours to <span class="ic a">net.voodoo.IOAudioFamily</span> makes the kernel treat them as two different kexts — <strong>AppleHDA keeps its family, VoodooHDA gets its own</strong>.</p>
+        </div>
+        <div class="rename rv">
+          <span class="old">com.apple.iokit.IOAudioFamily</span>
+          <i data-lucide="arrow-right"></i>
+          <span class="new">net.voodoo.IOAudioFamily</span>
+          <span class="where">↳ renamed inside the Mach-O binary and in Info.plist</span>
+        </div>
+        <div class="lanes rv">
+          <div class="lane">
+            <span class="lane-src">SystemKC</span>
+            <span class="kchip">com.apple.iokit.IOAudioFamily</span>
+            <i data-lucide="arrow-right"></i>
+            <span class="lane-use">serves AppleHDA — untouched</span>
+          </div>
+          <div class="lane">
+            <span class="lane-src">Injected</span>
+            <span class="kchip a">net.voodoo.IOAudioFamily</span>
+            <i data-lucide="arrow-right"></i>
+            <span class="lane-use">serves VoodooHDA — via bootloader</span>
+          </div>
+          <div class="lanes-foot"><i data-lucide="check-circle-2"></i>same binary · different identifier · zero collision</div>
+        </div>
+      </section>
+
+      <!-- ============ 08 KDK ============ -->
+      <section id="s08">
+        <header class="sec-h rv">
+          <span class="sec-no">§08</span>
+          <div>
+            <div class="kicker">Why KDK binaries matter</div>
+            <h2>Pre-link, or not at all</h2>
+          </div>
+          <span class="sec-mark">08</span>
+        </header>
+        <div class="prose rv">
+          <p>A kext binary extracted from a kernel collection has its relocations <strong>already applied</strong> by Apple's <span class="ic">kcgen</span>. The booter needs <strong>pre-link binaries</strong> (relocations intact) to place them at a new address. KDK ships pristine pre-link binaries — that is why the script refuses to use anything else.</p>
+        </div>
+        <div class="cmp bad rv">
+          <i data-lucide="x-circle"></i>
+          <div>
+            <h4>SystemKernelExtensions.kc</h4>
+            <p>relocations already applied by kcgen — binary is <b>pre-relocated</b>. The booter cannot place it at a new address → <b>boot hangs</b>.</p>
+          </div>
+        </div>
+        <div class="cmp good rv">
+          <i data-lucide="check-circle-2"></i>
+          <div>
+            <h4>Kernel Debug Kit</h4>
+            <p>pristine <b>pre-link</b> binaries — relocations intact. The booter resolves and places them at prelink time → <b>boot succeeds</b>.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 09 TESTED ============ -->
+      <section id="s09">
+        <header class="sec-h rv">
+          <span class="sec-no">§09</span>
+          <div>
+            <div class="kicker">Field report</div>
+            <h2>Tested</h2>
+          </div>
+          <span class="sec-mark">09</span>
+        </header>
+        <div class="rv">
+          <div class="trow">
+            <span class="tname">VoodooHDA V-2.9.2</span>
+            <span class="tdesc">audio <strong>CONFIRMED</strong> — analog + HDMI <span class="dim">· macOS 26.3</span></span>
+            <span class="badge">CONFIRMED</span>
+          </div>
+          <div class="trow">
+            <span class="tname">VoodooHDA V-2.9.2</span>
+            <span class="tdesc">use for old machines <span class="dim">· e.g. HP ProDesk 600 G1</span></span>
+            <span class="badge mono2">LEGACY&nbsp;HARDWARE</span>
+          </div>
+          <div class="trow">
+            <span class="tname">OpenCore + Clover</span>
+            <span class="tdesc">both verified <span class="dim">· shared OcAppleKernelLib engine</span></span>
+            <span class="badge mono2">DUAL&nbsp;BOOTLOADER</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 10 CREDITS ============ -->
+      <section id="s10">
+        <header class="sec-h rv">
+          <span class="sec-no">§10</span>
+          <div>
+            <div class="kicker">Thanks</div>
+            <h2>Credits</h2>
+          </div>
+          <span class="sec-mark">10</span>
+        </header>
+        <div class="rv">
+          <div class="crow"><span class="cname">chris1111</span><span class="crole">alias technique · script · VoodooHDA contributor</span></div>
+          <div class="crow"><span class="cname">Slice · AutumnRain · Zenith432</span><span class="crole">original VoodooHDA developers</span></div>
+          <div class="crow"><span class="cname">Dortania</span><span class="crole">KDK mirrors</span></div>
+          <div class="crow"><span class="cname">Acidanthera</span><span class="crole">OcAppleKernelLib — the injection engine we patched through</span></div>
+        </div>
+      </section>
+
+      <footer>
+        <span>VOODOOHDA BOOTLOADER INJECTOR — page built from README.md<br>SIP fully enabled. Always.</span>
+        <a href="https://github.com/chris1111/VoodooHDA-Bootloader-Injector" target="_blank" rel="noopener"><i data-lucide="github"></i>github.com/chris1111/VoodooHDA-Bootloader-Injector</a>
+      </footer>
+
+    </div>
+  </main>
+</div>
+
+<!-- back to top -->
+<button id="toTop" title="Back to top" aria-label="Back to top"><i data-lucide="arrow-up"></i></button>
+
+<!-- toast -->
+<div id="toast"><i data-lucide="check"></i><span>Copied to clipboard</span></div>
+
+<script>
+(function(){
+  "use strict";
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const sleep = ms => new Promise(r => setTimeout(r, reduced ? Math.min(ms,120) : ms));
+
+  /* ---------- icons ---------- */
+  if (window.lucide) lucide.createIcons();
+
+  /* ---------- scroll progress ---------- */
+  const pbar = document.getElementById('pbar');
+  addEventListener('scroll', () => {
+    const h = document.documentElement;
+    const p = h.scrollTop / Math.max(1, h.scrollHeight - h.clientHeight);
+    pbar.style.width = (p * 100) + '%';
+  }, { passive:true });
+
+  /* ---------- back to top ---------- */
+  const toTop = document.getElementById('toTop');
+  function toggleTop(){ toTop.classList.toggle('show', scrollY > 480); }
+  addEventListener('scroll', toggleTop, { passive:true });
+  toggleTop();
+  toTop.addEventListener('click', () => scrollTo({ top:0, behavior: reduced ? 'auto' : 'smooth' }));
+
+  /* ---------- reveal on scroll ---------- */
+  const ro = new IntersectionObserver(es => es.forEach(e => {
+    if (e.isIntersecting) { e.target.classList.add('in'); ro.unobserve(e.target); }
+  }), { threshold:.1 });
+  document.querySelectorAll('.rv').forEach(el => ro.observe(el));
+
+  /* ---------- section scroll-spy ---------- */
+  const links = [...document.querySelectorAll('#nav a')];
+  const spy = new IntersectionObserver(es => es.forEach(e => {
+    if (e.isIntersecting) {
+      links.forEach(l => l.classList.toggle('on', l.getAttribute('href') === '#' + e.target.id));
+    }
+  }), { rootMargin:'-30% 0px -60% 0px' });
+  document.querySelectorAll('main section[id]').forEach(s => spy.observe(s));
+
+  /* ---------- toast ---------- */
+  const toast = document.getElementById('toast');
+  let toastT;
+  function showToast(msg){
+    toast.querySelector('span').textContent = msg;
+    toast.classList.add('show');
+    clearTimeout(toastT);
+    toastT = setTimeout(() => toast.classList.remove('show'), 1800);
+  }
+
+  /* ---------- copy buttons ---------- */
+  document.querySelectorAll('[data-copy]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const text = btn.getAttribute('data-copy');
+      try { await navigator.clipboard.writeText(text); }
+      catch(_) {
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.style.cssText = 'position:fixed;opacity:0';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); } catch(_e){}
+        ta.remove();
+      }
+      btn.classList.add('done');
+      setTimeout(() => btn.classList.remove('done'), 1400);
+      showToast(btn.dataset.msg || 'Copied to clipboard');
+    });
+  });
+
+  /* ---------- hero boot log (typewriter) ---------- */
+  const BOOT = [
+    [ {t:'[  0.000000] ',c:'dim'},{t:'OC: ',c:'dim'},{t:'OcAppleKernelLib — prelink injection engine ready',c:''} ],
+    [ {t:'[  0.018241] ',c:'dim'},{t:'OC: ',c:'dim'},{t:'injecting ',c:''},{t:'VoodooHDA.kext',c:'kname'},{t:' (2.9.2)',c:'dim'} ],
+    [ {t:'[  0.018567] ',c:'dim'},{t:'OC: ',c:'dim'},{t:'link target → ',c:''},{t:'com.apple.iokit.IOAudioFamily',c:'kname'} ],
+    [ {t:'[  0.018572] ',c:'dim'},{t:'      parent classes not in BootKernelExtensions.kc',c:'err'} ],
+    [ {t:'[  0.018990] ',c:'dim'},{t:'OC: ',c:'dim'},{t:'Prelinked injection VoodooHDA.kext () - Invalid Parameter',c:'err'} ],
+    [ {t:'',c:''},{t:'// fix on this page → the alias trick (§02)',c:'cm'} ]
+  ];
+  const bootEl = document.getElementById('bootLines');
+  const cursor = document.createElement('span'); cursor.className = 'cur';
+  let playing = false;
+
+  async function playBoot(){
+    if (playing) return;
+    playing = true;
+    bootEl.innerHTML = '';
+    bootEl.appendChild(cursor);
+    if (reduced) {
+      BOOT.forEach(line => {
+        const d = document.createElement('div'); d.className = 'bl';
+        line.forEach(seg => {
+          const s = document.createElement('span'); s.className = seg.c || ''; s.textContent = seg.t; d.appendChild(s);
+        });
+        bootEl.insertBefore(d, cursor);
+      });
+      playing = false; return;
+    }
+    for (const line of BOOT){
+      const d = document.createElement('div'); d.className = 'bl';
+      bootEl.insertBefore(d, cursor);
+      for (const seg of line){
+        const s = document.createElement('span'); s.className = seg.c || ''; d.appendChild(s);
+        for (const ch of seg.t){ s.textContent += ch; await sleep(7 + Math.random() * 20); }
+      }
+      await sleep(280);
+    }
+    playing = false;
+  }
+  document.getElementById('bootReplay').addEventListener('click', playBoot);
+  setTimeout(playBoot, 550);
+
+  /* ---------- link-order simulator ---------- */
+  const tray    = document.getElementById('tray');
+  const buffer  = document.getElementById('buffer');
+  const bufPh   = document.getElementById('bufPh');
+  const cardA   = document.getElementById('cardIOAF');
+  const cardV   = document.getElementById('cardVood');
+  const simLog  = document.getElementById('simLog');
+  const simStat = document.getElementById('simStatus');
+  const runBtn  = document.getElementById('simRun');
+  const rstBtn  = document.getElementById('simReset');
+  const segGood = document.getElementById('segGood');
+  const segBad  = document.getElementById('segBad');
+
+  const S = { order:'good', running:false };
+
+  function flipMove(card, zone){
+    const r1 = card.getBoundingClientRect();
+    zone.appendChild(card);
+    if (reduced) return;
+    const r2 = card.getBoundingClientRect();
+    const dx = r1.left - r2.left, dy = r1.top - r2.top;
+    card.style.transition = 'none';
+    card.style.transform = `translate(${dx}px,${dy}px)`;
+    requestAnimationFrame(() => {
+      card.style.transition = 'transform .5s cubic-bezier(.22,.8,.3,1)';
+      card.style.transform = 'translate(0,0)';
+    });
+  }
+  function updatePh(){ bufPh.style.display = buffer.querySelector('.kcard') ? 'none' : 'block'; }
+  function mark(card, glyph, cls){ card.querySelector('.kmark').textContent = glyph; card.classList.add(cls); }
+  function setStatus(mode, html, icon){
+    simStat.className = 'sim-status' + (mode !== 'idle' ? ' ' + mode : '');
+    simStat.innerHTML = `<i data-lucide="${icon}"></i><span>${html}</span>`;
+    if (window.lucide) lucide.createIcons();
+  }
+  function logLine(kind, html){
+    const d = document.createElement('div');
+    d.className = 'ln ' + kind;
+    d.innerHTML = `<span class="lg">${kind==='ok' ? '✓' : kind==='err' ? '✗' : '·'}</span><span>${html}</span>`;
+    simLog.appendChild(d);
+  }
+  function simClear(){
+    [cardA, cardV].forEach(c => {
+      c.classList.remove('linked','failed','late');
+      c.querySelector('.kmark').textContent = '';
+      c.style.transition = 'none'; c.style.transform = '';
+      tray.appendChild(c);
+    });
+    simLog.innerHTML = '';
+    setStatus('idle', 'Pick an order, then run the prelink.', 'info');
+    updatePh();
+  }
+  function setButtons(on){
+    [runBtn, rstBtn, segGood, segBad].forEach(b => b.disabled = !on);
+  }
+  function setOrder(o){
+    if (S.running) return;
+    S.order = o;
+    segGood.classList.toggle('active', o === 'good');
+    segBad.classList.toggle('active', o === 'bad');
+    runBtn.querySelector('span').textContent = 'Run prelink';
+    simClear();
+  }
+  segGood.addEventListener('click', () => setOrder('good'));
+  segBad.addEventListener('click', () => setOrder('bad'));
+  rstBtn.addEventListener('click', () => {
+    if (S.running) return;
+    runBtn.querySelector('span').textContent = 'Run prelink';
+    simClear();
+  });
+
+  async function simRun(){
+    if (S.running) return;
+    S.running = true; setButtons(false);
+    simClear();
+    const T = t => `<span class="lt">[${t}]</span>`;
+
+    if (S.order === 'good'){
+      await sleep(420);
+      flipMove(cardA, buffer); updatePh();
+      await sleep(820);
+      logLine('ok', T('0.208') + ' prelink IOAudioFamily.kext — imports → com.apple.kpi.* · resolved against kernel');
+      await sleep(680);
+      flipMove(cardV, buffer); updatePh();
+      await sleep(820);
+      logLine('ok', T('0.412') + ' prelink VoodooHDA.kext — 191 imports → net.voodoo.IOAudioFamily · found in buffer · 191/191 resolved');
+      await sleep(520);
+      mark(cardA, '✓', 'linked'); mark(cardV, '✓', 'linked');
+      setStatus('ok', 'Prelink complete — audio stack linked. Reboot.', 'check-circle-2');
+    } else {
+      await sleep(420);
+      flipMove(cardV, buffer); updatePh();
+      await sleep(820);
+      logLine('diml', T('0.190') + ' prelink VoodooHDA.kext — 191 imports → net.voodoo.IOAudioFamily …');
+      await sleep(760);
+      logLine('err', T('0.190') + ' net.voodoo.IOAudioFamily not in buffer — parent classes absent from BootKernelExtensions.kc');
+      mark(cardV, '✗', 'failed');
+      cardA.classList.add('late');
+      await sleep(480);
+      setStatus('err', 'OC: Prelinked injection VoodooHDA.kext () - Invalid Parameter', 'x-circle');
+    }
+    S.running = false; setButtons(true);
+    runBtn.querySelector('span').textContent = 'Run again';
+  }
+  runBtn.addEventListener('click', simRun);
+  simClear();
+})();
+</script>
+</body>
+</html>
