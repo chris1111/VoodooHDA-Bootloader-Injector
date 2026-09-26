@@ -146,7 +146,7 @@ intact) to place them at a new address. KDK ships pristine pre-link binaries
 
 ## Credits
 
-    chris1111  — alias technique, script, VoodooHDA maintainer
+    chris1111  — alias technique, script, VoodooHDA contributor
     Slice, AutumnRain, Zenith432  — original VoodooHDA developer
     Dortania   — KDK mirrors
     Acidanthera — OcAppleKernelLib (the injection engine we patched through)
