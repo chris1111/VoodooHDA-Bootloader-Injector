@@ -83,12 +83,33 @@ Both kexts are re-signed after patching, so signatures verify cleanly.
 
 ## What YOU do after the script
 
-    1. Copy BOTH kexts to EFI/OC/Kexts (or EFI/CLOVER/kexts/Other)
-    2. OC config: Kernel -> Add
-         IOAudioFamily.kext   ABOVE   VoodooHDA.kext
-       (array order = link order — wrong order = Invalid Parameter)
-    3. No Kernel -> Block entries
-    4. No other steps. No SIP changes — works with SIP fully enabled
+### Installation (Clover)
+
+| Step | Action | Detail |
+|------|--------|--------|
+| 1 | Copy BOTH kexts | `EFI/CLOVER/kexts/Other/` |
+| 2 | Kernel → Block | No entries needed |
+| 4 | SIP | No changes — works fully enabled |
+| 5 | Reboot|  |
+
+SIP (verified: macOS Tahoe 26.7.1, OpenCore 1.0.7, csr-active-config = 00000000). 
+ 
+
+### Installation (OpenCore)
+
+| Step | Action | Detail |
+|------|--------|--------|
+| 1 | Copy BOTH kexts | `EFI/OC/Kexts/` |
+| 2 | OC config: Kernel → Add | Array order = link order (wrong order = `Invalid Parameter`): see table below |
+| 3 | Kernel → Block | No entries needed |
+| 4 | SIP | No changes — works fully enabled |
+
+**Kernel → Add — required order:**
+
+| Order | BundlePath | Position |
+|-------|------------|----------|
+| **1** | `IOAudioFamily.kext` | **TOP** — must be first |
+| 2 | `VoodooHDA.kext` | below IOAudioFamily |
    (verified: macOS Tahoe 26.7.1, OpenCore 1.0.7, csr-active-config = 00000000). 
     5. Reboot 
 
